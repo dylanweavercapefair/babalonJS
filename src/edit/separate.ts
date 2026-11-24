@@ -28,6 +28,8 @@ export type SelectTool = 'piece' | 'smart' | 'lasso' | 'brush';
 export class Separator {
   selection: FaceSelection | null = null;
   readonly editor: Editor;
+  subdivision: import('./subdivision').SubDCage | null = null;
+  private subdivisionGeneration = 0;
   constructor(editor: Editor) { this.editor = editor; }
   blocker(entity: Entity) {
     if (!entity.source || entity.kind !== 'model' || entity.meshes.some(m => !(m instanceof Mesh) || !m.getVerticesData('position') || m.getClassName().includes('Splat'))) return tr('Choose a triangle model to separate.');
@@ -40,7 +42,7 @@ export class Separator {
    * objects, like Shrinkwrap, can be limited to them (Blender's vertex group).
    */
   lastFaces: { entity: Entity; masks: Map<Mesh, Uint8Array> } | null = null;
-  stop() { this.cutGeneration++; this.cutLoading = false; this.sculpting = null; if (this.selection?.count) this.lastFaces = { entity: this.selection.entity, masks: this.selection.vertexMasks() }; this.sculptContexts.clear(); this.clearBridge(); this.transform?.dispose(); this.transform = null; this.mode = 'select'; this.selection?.dispose(); this.selection = null; this.editor.refreshTool(); }
+  stop() { this.cutGeneration++; this.subdivisionGeneration++; this.cutLoading = false; this.sculpting = null; if (this.selection?.count) this.lastFaces = { entity: this.selection.entity, masks: this.selection.vertexMasks() }; this.sculptContexts.clear(); this.clearBridge(); this.subdivision?.dispose(); this.subdivision = null; this.transform?.dispose(); this.transform = null; this.mode = 'select'; this.selection?.dispose(); this.selection = null; this.editor.refreshTool(); }
   copy(from: Entity, to: Entity) { if (from.separation) this.restore(to, structuredClone(from.separation!)); }
   restore(entity: Entity, state: SeparationState) {
     if (state.meshes.length !== entity.meshes.length) throw new Error(tr('The separated model does not match its source.'));
@@ -92,6 +94,7 @@ export class Separator {
   mode: 'select' | 'transform' | 'surface' = 'select';
   transform: SelectionTransform | null = null;
   setMode(mode: typeof this.mode) {
+    if (this.subdivision && mode !== 'select') void this.setSubdivision(false);
     if (mode !== 'select') { const reason = editBlocker(this.selection!.entity); if (reason) throw new Error(reason); }
     if (mode === 'transform' && !this.selection!.count) throw new Error(tr('Select faces first.'));
     this.clearBridge();
@@ -105,6 +108,30 @@ export class Separator {
       for (const mesh of selection.faces.keys()) if (!this.sculptContexts.has(mesh)) this.sculptContexts.set(mesh, new SculptContext(mesh, selection));
       selection.refresh();
     }, 50);
+  }
+
+  setSubdivision(on: boolean): Promise<void> {
+    const generation = ++this.subdivisionGeneration;
+    if (!!this.subdivision === on) return Promise.resolve();
+    if (!on) {
+      this.subdivision?.dispose();
+      this.subdivision = null;
+      this.editor.refreshTool();
+      this.editor.notify('tool');
+      this.editor.invalidate();
+      return Promise.resolve();
+    }
+    const selection = this.selection;
+    if (!selection) return Promise.resolve();
+    if (this.mode !== 'select') this.setMode('select');
+    this.tool = 'piece';
+    return import('./subdivision').then(({ SubDCage }) => {
+      if (generation !== this.subdivisionGeneration || this.selection !== selection || this.subdivision) return;
+      this.subdivision = new SubDCage(this.editor, this, selection);
+      this.editor.refreshTool();
+      this.editor.notify('tool');
+      this.editor.invalidate();
+    });
   }
 
   /** Soft selection for Move / Rotate / Scale of faces (world units along the surface). */
@@ -136,13 +163,19 @@ export class Separator {
   tap(x: number, y: number, modifier: 'add' | 'remove' | null = null) {
     const selection = this.selection;
     if (!selection || this.cut || this.mode === 'surface') return;
-    const hit = this.editor.pickSurface(x, y);
+    if (this.subdivision?.isCageSurfaceAt(x, y)) return;
+    this.subdivision?.clearPointSelection();
+    this.subdivision?.cancelExtrusion();
+    const cageHit = this.subdivision?.pickFace(x, y);
+    const hit = this.subdivision ? null : this.editor.pickSurface(x, y);
     const add = modifier ? modifier === 'add' : this.add;
-    if (!hit || hit.entity !== selection.entity || !(hit.mesh instanceof Mesh) || hit.faceId < 0) {
+    const mesh = cageHit?.mesh ?? (hit?.mesh instanceof Mesh && hit.entity === selection.entity ? hit.mesh : null);
+    const faceId = cageHit?.faceId ?? hit?.faceId ?? -1;
+    if (!mesh || faceId < 0) {
       if (modifier || !selection.count) return;
       selection.clear();
-    } else if (this.tool === 'smart') smartSelect(selection, hit.mesh, hit.faceId, this.tolerance, add);
-    else selection.island(hit.mesh, hit.faceId, add);
+    } else if (this.tool === 'smart') smartSelect(selection, mesh, faceId, this.tolerance, add);
+    else selection.island(mesh, faceId, add);
     if (this.transform) {
       if (selection.count) this.transform.recenter();
       else this.setMode('select');
@@ -221,7 +254,7 @@ export class Separator {
     const next = { meshes: parts, pivot: previous?.pivot ?? [0, 0, 0], rigSpace: !!entity.rig };
     const apply = (state: typeof previous, meshes: MeshPart[]) => {
       meshes.forEach((p, i) => applyPart(entity.meshes[i] as Mesh, p)); entity.separation = state;
-      selection.invalidateTopology(); selection.refresh(); this.editor.refreshShadowCasters(); this.editor.notify('transform');
+      selection.invalidateTopology(); selection.refresh(); this.subdivision?.refresh(); this.editor.refreshShadowCasters(); this.editor.notify('transform');
     };
     apply(next, parts);
     this.editor.record({ undo: () => apply(previous, before), redo: () => apply(next, parts) });

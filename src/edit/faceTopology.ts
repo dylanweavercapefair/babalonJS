@@ -15,6 +15,49 @@ export interface FaceTopology {
   vertexFaces: Uint32Array;
 }
 
+/** Smooth falloff by shortest distance along connected mesh edges from welded source vertices. */
+export function topologyWeights(topology: FaceTopology, indices: ArrayLike<number>, positions: Float32Array, seeds: Iterable<number>, radius: number, scale = 1) {
+  const groups = topology.vertexStart.length - 1;
+  const distance = new Float32Array(groups).fill(Infinity);
+  const heap = new MinHeap(groups);
+  for (const seed of seeds) if (seed >= 0 && seed < groups && distance[seed] !== 0) {
+    distance[seed] = 0;
+    heap.push(seed, 0);
+  }
+  const representative = new Int32Array(groups).fill(-1);
+  for (let v = 0; v < topology.weld.length; v++) if (representative[topology.weld[v]] < 0) representative[topology.weld[v]] = v;
+  const done = new Uint8Array(groups);
+  while (heap.size) {
+    const a = heap.pop();
+    if (done[a]) continue;
+    done[a] = 1;
+    if (distance[a] >= radius) continue;
+    const pa = representative[a] * 3, da = distance[a];
+    for (let k = topology.vertexStart[a]; k < topology.vertexStart[a + 1]; k++) {
+      const face = topology.vertexFaces[k];
+      for (let j = 0; j < 3; j++) {
+        const b = topology.weld[indices[face * 3 + j]];
+        if (b === a || done[b]) continue;
+        const pb = representative[b] * 3;
+        const next = da + Math.hypot(positions[pb] - positions[pa], positions[pb + 1] - positions[pa + 1], positions[pb + 2] - positions[pa + 2]) * scale;
+        if (next < radius && next < distance[b]) {
+          distance[b] = next;
+          heap.push(b, next);
+        }
+      }
+    }
+  }
+  const weights = new Float32Array(topology.weld.length);
+  for (let v = 0; v < weights.length; v++) {
+    const d = distance[topology.weld[v]];
+    if (d !== Infinity) {
+      const t = d === 0 ? 1 : radius > 0 ? Math.max(0, 1 - d / radius) : 0;
+      weights[v] = t * t * (3 - 2 * t);
+    }
+  }
+  return weights;
+}
+
 /** Pure version (also run in a worker, see topology.worker.ts). */
 export function computeTopology(positions: Float32Array, indices: ArrayLike<number>): FaceTopology {
   const faces = indices.length / 3;
@@ -48,6 +91,39 @@ export function computeTopology(positions: Float32Array, indices: ArrayLike<numb
   const list = new Uint32Array(count[faces]);
   for (let f = 0; f < faces; f++) list.set(edgeNeighbors(f, scratch), count[f]);
   return { offsets: count, list, weld: map, vertexStart: vStart, vertexFaces: vFaces };
+}
+
+class MinHeap {
+  private items: Uint32Array;
+  private keys: Float32Array;
+  size = 0;
+  constructor(capacity: number) { this.items = new Uint32Array(Math.max(16, capacity)); this.keys = new Float32Array(this.items.length); }
+  push(item: number, key: number) {
+    if (this.size === this.items.length) {
+      const items = new Uint32Array(this.size * 2), keys = new Float32Array(this.size * 2);
+      items.set(this.items); keys.set(this.keys); this.items = items; this.keys = keys;
+    }
+    let i = this.size++;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (this.keys[parent] <= key) break;
+      this.items[i] = this.items[parent]; this.keys[i] = this.keys[parent]; i = parent;
+    }
+    this.items[i] = item; this.keys[i] = key;
+  }
+  pop() {
+    const top = this.items[0], lastItem = this.items[--this.size], lastKey = this.keys[this.size];
+    let i = 0;
+    while (true) {
+      let child = i * 2 + 1;
+      if (child >= this.size) break;
+      if (child + 1 < this.size && this.keys[child + 1] < this.keys[child]) child++;
+      if (this.keys[child] >= lastKey) break;
+      this.items[i] = this.items[child]; this.keys[i] = this.keys[child]; i = child;
+    }
+    this.items[i] = lastItem; this.keys[i] = lastKey;
+    return top;
+  }
 }
 
 /**

@@ -379,6 +379,8 @@ export class Editor {
   extra: Entity[] = [];
   /** Touch: taps add to / remove from the selection instead of replacing it. */
   multiSelect = false;
+  /** Sticky on-screen modifiers for touch and pen input. */
+  readonly inputModifiers = { control: false, alt: false, shift: false };
   private followStart: { entity: Entity; pos: Vector3 }[] = [];
   private primaryStart: Vector3 | null = null;
   private undoStack: Command[] = [];
@@ -481,7 +483,10 @@ export class Editor {
       if (this.separator.active) {
         if (info.type === PointerEventTypes.POINTERTAP) {
           const ev = info.event as PointerEvent;
-          this.separator.tap(scene.pointerX, scene.pointerY, ev.shiftKey ? 'add' : ev.ctrlKey || ev.metaKey || ev.altKey ? 'remove' : null);
+          this.separator.tap(scene.pointerX, scene.pointerY,
+            ev.shiftKey || this.inputModifiers.shift ? 'add'
+              : ev.ctrlKey || ev.metaKey || ev.altKey || this.inputModifiers.control || this.inputModifiers.alt ? 'remove'
+                : null);
         }
         return;
       }
@@ -503,7 +508,8 @@ export class Editor {
         const entity = pick?.pickedMesh ? this.entityOf(pick.pickedMesh) : null;
         // Tapping empty space always deselects (also with multi-select on)
         if (!entity) return this.select(null);
-        const additive = this.multiSelect || ev.shiftKey || ev.ctrlKey || ev.metaKey;
+        const additive = this.multiSelect || ev.shiftKey || ev.ctrlKey || ev.metaKey
+          || this.inputModifiers.shift || this.inputModifiers.control;
         this.select(entity, additive);
       } else if (info.type === PointerEventTypes.POINTERDOUBLETAP) {
         const pick = this.pickScene(scene.pointerX, scene.pointerY);
@@ -1411,6 +1417,7 @@ export class Editor {
     entity.visible = visible;
     if (entity.groupMembers) { entity.root.setEnabled(visible); this.refreshShadows(); this.emit('entities'); return; }
     for (const m of entity.meshes) m.isVisible = visible;
+    if (this.separator.subdivision?.entity === entity) this.separator.subdivision.setVisible(visible);
     if (entity.light) entity.light.setEnabled(visible);
     this.refreshShadows();
     this.emit('entities');
@@ -2328,6 +2335,7 @@ export class Editor {
     this.rigger.difference.clear();
     for (const e of this.entities) if (e.rig) updateHelperBones(e.rig);
     const exclude = new Set<Node>([this.ground, this.grid, ...this.helpers, ...this.overlays]);
+    for (const node of this.separator.subdivision?.exportExclusions() ?? []) exclude.add(node);
     for (const e of this.entities) {
       if (!e.visible) {
         exclude.add(e.root);

@@ -296,12 +296,18 @@ export class ContextBar {
 
   /** View controls yield vertically when they share the bubbles' horizontal space. */
   private avoidViewControls() {
-    const view = this.ui.viewStack;
-    view.style.bottom = '';
-    if (!this.el.classList.contains('show') || !view.offsetHeight) return;
-    const b = this.el.getBoundingClientRect(), v = view.getBoundingClientRect();
-    if (b.left < v.right + 8 && b.right > v.left - 8 && b.top < v.bottom + 8 && b.bottom > v.top - 8) {
-      view.style.bottom = `${window.innerHeight - b.top + 12}px`;
+    for (const view of [this.ui.viewStack, this.ui.modifierStack]) {
+      view.style.bottom = '';
+      if (!view.offsetHeight) continue;
+      if (view === this.ui.modifierStack && window.innerWidth <= 760 && document.body.classList.contains('panel-open')) {
+        const panel = this.ui.panel.getBoundingClientRect();
+        if (panel.top > 0) view.style.bottom = `${window.innerHeight - panel.top + 12}px`;
+      }
+      if (!this.el.classList.contains('show')) continue;
+      const b = this.el.getBoundingClientRect(), v = view.getBoundingClientRect();
+      if (b.left < v.right + 8 && b.right > v.left - 8 && b.top < v.bottom + 8 && b.bottom > v.top - 8) {
+        view.style.bottom = `${window.innerHeight - b.top + 12}px`;
+      }
     }
   }
 

@@ -106,13 +106,18 @@ export class SeparatePanel {
       if (s.mode === 'transform' && ed.tool === t && t !== 'move') return this.ui.transformBar.toggle();
       if (s.mode !== 'transform') s.setMode('transform');
       ed.setTool(t); render();
-    }), { active: s.mode === 'transform' && ed.tool === t, label, cls: 'tool' });
+    }), { active: s.mode === 'transform' && ed.tool === t, label, cls: 'tool', disabled: !!s.subdivision });
+    const cageButton = iconButton(Triangle, tr('SubD Cage'), () => this.ui.run(async () => {
+      await s.setSubdivision(!s.subdivision);
+      render();
+    }), { active: !!s.subdivision, label: tr('SubD Cage'), cls: 'tool' });
     this.ui.selbar.classList.add('show');
     const mode = this.ui.modeSwitch();
     this.ui.renderContextParts([
       { id: 'mode', icon: Triangle, label: tr('Object / Mesh'), content: mode ? [mode] : [] },
       { id: 'tools', icon: MousePointer2, label: count ? tr('{n} faces', { n: count.toLocaleString() }) : tr('Choose faces'), content: [
         iconButton(MousePointer2, tr('Select faces'), () => this.ui.run(() => { s.setMode('select'); if (this.part === 'sculpt') this.part = 'select'; render(); }), { active: s.mode === 'select', label: tr('Select'), cls: 'tool' }),
+        cageButton,
         tool('move', Move3d, tr('Move')), tool('rotate', Rotate3d, tr('Rotate')), tool('scale', Scale3d, tr('Scale')),
       ] },
       { id: 'view', icon: Focus, label: tr('Camera and actions'), content: this.ui.contextCameraControls() },
@@ -131,7 +136,7 @@ export class SeparatePanel {
       { id: 'brush', label: tr('Brush'), icon: Brush },
     ];
     const hints: Record<SelectTool, string> = {
-      piece: tr('Tap the model: selects the whole connected piece.'),
+      piece: tr(s.subdivision ? 'Tap a cage face to select its connected piece.' : 'Tap the model: selects the whole connected piece.'),
       smart: tr('Tap the model: selects a region up to creases, texture seams and narrow parts.'),
       lasso: tr('Draw around what you want with one finger. Two fingers (or the right mouse button) rotate the view, pinch to zoom.'),
       brush: tr('Paint over what you want with one finger. Two fingers (or the right mouse button) rotate the view, pinch to zoom.'),
@@ -142,9 +147,23 @@ export class SeparatePanel {
     const materials = target?.material instanceof MultiMaterial ? target.material.subMaterials : [target?.material];
     const materialPicker = () => select(tr('New faces material'), materials.map((m, i) => ({ value: String(i), label: m?.name || tr('Material {n}', { n: i + 1 }) })), String(cut ? cut.capMaterial : s.repairMaterial), v => { if (cut) { cut.capMaterial = +v; if (cut.cap) this.ui.run(() => cut.preview()); } else s.repairMaterial = +v; });
     const selectContent = [
+      s.subdivision ? section(
+        tr('SubD Cage'),
+        hint(tr('Pencil hover previews a point, edge, or face patch. Touch uses the same context on contact; drag to move, Shift to add or remove.')),
+        toggle(tr('X symmetry'), s.subdivision.symmetry, v => { if (s.subdivision) s.subdivision.symmetry = v; }),
+        hint(tr('Mirrors cage-point moves across local X=0 when matching points exist.')),
+        slider(tr('Soft radius'), s.subdivision.softRadius, { min: 0, max: s.subdivision.softRadiusMax, step: Math.max(s.subdivision.softRadiusMax / 100, 0.001) }, v => { if (s.subdivision) s.subdivision.softRadius = v; }),
+        sel.count ? slider(tr('Extrusion distance'), s.subdivision.extrudeDistance, {
+          min: -s.subdivision.softRadiusMax * 0.5,
+          max: s.subdivision.softRadiusMax * 0.5,
+          step: Math.max(s.subdivision.softRadiusMax / 200, 0.001),
+          format: v => v.toFixed(2),
+          onCommit: () => { s.subdivision?.commitExtrusion(); this.ui.renderPanel(); this.ui.renderSelbar(); },
+        }, v => s.subdivision?.setExtrusionDistance(v)) : hint(tr('Select cage faces to extrude them.')),
+      ) : null,
       section(
         tr('Select'),
-        segmented(tools, s.tool, (id) => this.ui.run(() => { s.setTool(id as SelectTool); if (s.mode !== 'select') s.setMode('select'); this.sync(); this.ui.renderSelbar(); })),
+        segmented(s.subdivision ? tools.slice(0, 1) : tools, s.tool, (id) => this.ui.run(() => { s.setTool(id as SelectTool); if (s.mode !== 'select') s.setMode('select'); this.sync(); this.ui.renderSelbar(); })),
         hint(hints[s.tool]),
         chips([{ value: 'add', label: tr('Add') }, { value: 'remove', label: tr('Remove') }], s.add ? 'add' : 'remove', (v) => s.set({ add: v === 'add' })),
         s.tool === 'smart' ? slider(tr('Tolerance'), s.tolerance * 100, { min: 0, max: 100, step: 1, format: (v) => `${Math.round(v)}%` }, (v) => s.set({ tolerance: v / 100 })) : null,

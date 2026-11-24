@@ -7,6 +7,7 @@ import type { FaceSelection } from './selection';
 import { Deform, DeformSpace, recordDeform } from './deform';
 import { editBlocker } from './combine';
 import { tr } from '../core/i18n';
+import { topologyWeights } from './faceTopology';
 
 /**
  * Moves, turns or scales only the selected faces with the gizmo (soft selection fades the change
@@ -47,46 +48,18 @@ export class SelectionTransform {
       if (!faces.size) continue;
       const topology = this.selection.neighbors(mesh), deform = new Deform(mesh, topology);
       const space = new DeformSpace(deform, false), base = mesh.skeleton ? space.positions.slice() : deform.base;
-      const { weld, vertexStart, vertexFaces } = topology, indices = mesh.getIndices()!, p = base;
-      let groups = 0;
-      for (let i = 0; i < weld.length; i++) if (weld[i] + 1 > groups) groups = weld[i] + 1;
-      // Distance along the surface (in world units) from the selection, per welded vertex
-      const distance = new Float32Array(groups).fill(Infinity), queue: number[] = [];
+      const { weld } = topology, indices = mesh.getIndices()!;
+      const seeds = new Set<number>();
       const m = faces.mask;
-      for (let f = 0; f < m.length; f++) if (m[f]) for (let j = 0; j < 3; j++) { const w = weld[indices[f * 3 + j]]; if (distance[w] !== 0) { distance[w] = 0; queue.push(w); } }
+      for (let f = 0; f < m.length; f++) if (m[f]) for (let j = 0; j < 3; j++) seeds.add(weld[indices[f * 3 + j]]);
       const world = mesh.computeWorldMatrix(true).clone();
       const scale = Math.cbrt(Math.abs(world.determinant())) || 1;
-      if (this.softRadius > 0) {
-        // Representative position of each welded vertex
-        const rep = new Int32Array(groups).fill(-1);
-        for (let i = 0; i < weld.length; i++) if (rep[weld[i]] < 0) rep[weld[i]] = i;
-        // Dijkstra over the surface: each vertex is settled once (a plain queue re-visits a lot)
-        const heap = new MinHeap(groups);
-        for (const w of queue) heap.push(w, 0);
-        const done = new Uint8Array(groups);
-        while (heap.size) {
-          const a = heap.pop(); if (done[a]) continue; done[a] = 1;
-          const pa = rep[a] * 3, da = distance[a];
-          for (let k = vertexStart[a]; k < vertexStart[a + 1]; k++) {
-            const f = vertexFaces[k];
-            for (let j = 0; j < 3; j++) {
-              const b = weld[indices[f * 3 + j]];
-              if (done[b]) continue;
-              const pb = rep[b] * 3;
-              const d = da + Math.hypot(p[pb] - p[pa], p[pb + 1] - p[pa + 1], p[pb + 2] - p[pa + 2]) * scale;
-              if (d < this.softRadius && d < distance[b]) { distance[b] = d; heap.push(b, d); }
-            }
-          }
-        }
-      }
+      const falloff = topologyWeights(topology, indices, base, seeds, this.softRadius, scale);
       // Moving vertices and their weights (smoothstep falloff)
       const vertices: number[] = [], weights: number[] = [];
       for (let i = 0; i < weld.length; i++) {
-        const d = distance[weld[i]];
-        if (d === Infinity) continue;
-        const t = d === 0 ? 1 : this.softRadius ? Math.max(0, 1 - d / this.softRadius) : 0;
-        if (t <= 0) continue;
-        vertices.push(i); weights.push(t * t * (3 - 2 * t));
+        if (falloff[i] <= 0) continue;
+        vertices.push(i); weights.push(falloff[i]);
       }
       this.sessions.push({ deform, space, base, vertices: Uint32Array.from(vertices), weights: Float32Array.from(weights), world, inverse: world.clone().invert() });
     }
@@ -137,38 +110,4 @@ function positionsDiffer(a: Float32Array, b: Float32Array) {
   if (a.length !== b.length) return true;
   for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return true;
   return false;
-}
-
-/** Binary min-heap of (item, key) on typed arrays (grows when needed). */
-class MinHeap {
-  private items: Uint32Array;
-  private keys: Float32Array;
-  size = 0;
-  constructor(capacity: number) { this.items = new Uint32Array(Math.max(16, capacity)); this.keys = new Float32Array(this.items.length); }
-  push(item: number, key: number) {
-    if (this.size === this.items.length) {
-      const items = new Uint32Array(this.size * 2), keys = new Float32Array(this.size * 2);
-      items.set(this.items); keys.set(this.keys); this.items = items; this.keys = keys;
-    }
-    let i = this.size++;
-    while (i > 0) {
-      const parent = (i - 1) >> 1;
-      if (this.keys[parent] <= key) break;
-      this.items[i] = this.items[parent]; this.keys[i] = this.keys[parent]; i = parent;
-    }
-    this.items[i] = item; this.keys[i] = key;
-  }
-  pop() {
-    const top = this.items[0], lastItem = this.items[--this.size], lastKey = this.keys[this.size];
-    let i = 0;
-    while (true) {
-      let child = i * 2 + 1;
-      if (child >= this.size) break;
-      if (child + 1 < this.size && this.keys[child + 1] < this.keys[child]) child++;
-      if (this.keys[child] >= lastKey) break;
-      this.items[i] = this.items[child]; this.keys[i] = this.keys[child]; i = child;
-    }
-    this.items[i] = lastItem; this.keys[i] = lastKey;
-    return top;
-  }
 }

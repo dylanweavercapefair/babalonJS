@@ -74,8 +74,9 @@ export class ModalTransform {
     if (k === 'enter') return this.finish(false);
     if (k === 'x' || k === 'y' || k === 'z') {
       // Pressing the same axis again frees it, like Blender
-      if (this.axis === k && this.exclude === ev.shiftKey) this.axis = null;
-      else { this.axis = k; this.exclude = ev.shiftKey; }
+      const shift = ev.shiftKey || this.ui.editor.inputModifiers.shift;
+      if (this.axis === k && this.exclude === shift) this.axis = null;
+      else { this.axis = k; this.exclude = shift; }
     } else if (/^[0-9.]$/.test(k)) this.typed += k;
     else if (k === '-') this.typed = this.typed.startsWith('-') ? this.typed.slice(1) : `-${this.typed}`;
     else if (k === 'backspace') this.typed = this.typed.slice(0, -1);
