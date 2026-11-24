@@ -29,9 +29,9 @@ export class ModalTransform {
     this.ui = ui;
     document.body.append(this.hint);
     const canvas = ui.editor.engine.getRenderingCanvas()!;
-    // Where the mouse is (keys start from it)
+    // Where the mouse or pen is (keys start from it)
     window.addEventListener('pointermove', (ev) => {
-      if (ev.pointerType !== 'mouse') return;
+      if (ev.pointerType !== 'mouse' && ev.pointerType !== 'pen') return;
       const r = canvas.getBoundingClientRect();
       this.pointer = { x: ev.clientX - r.left, y: ev.clientY - r.top };
       this.onCanvas = ev.target === canvas;

@@ -397,8 +397,7 @@ export class Editor {
   private lastCameraMove = 0;
 
   constructor(canvas: HTMLCanvasElement) {
-    this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true }, false);
-    this.engine.setHardwareScalingLevel(1 / Math.min(window.devicePixelRatio || 1, 2));
+    this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true }, true);
     const scene = (this.scene = new Scene(this.engine));
     scene.clearColor = Color4.FromHexString(this.env.background + 'ff');
 
@@ -495,9 +494,9 @@ export class Editor {
       if (info.type === PointerEventTypes.POINTERTAP) {
         if (this.tools.measuring) return;
         const ev = info.event as PointerEvent;
-        // "Hovered" only means something for a mouse: after a touch drag on a gizmo it stays
-        // stuck and would swallow every later tap. The geometric pick below covers touch.
-        if (ev.pointerType === 'mouse' && this.gizmos?.isHovered) return;
+        // "Hovered" only means something for mouse-like pointers: after a touch drag on a gizmo it
+        // stays stuck and would swallow every later tap. The geometric pick below covers touch.
+        if ((ev.pointerType === 'mouse' || ev.pointerType === 'pen') && this.gizmos?.isHovered) return;
         const util = this.gizmos?.utilityLayer.utilityLayerScene.pick(scene.pointerX, scene.pointerY);
         if (util?.hit) return;
         const pick = this.pickScene(scene.pointerX, scene.pointerY);

@@ -342,8 +342,8 @@ export class SeparatePanel {
     canvas.addEventListener('pointerdown', (ev) => {
       if (replayed.has(ev)) return;
       if (!this.drawing()) return;
-      // Mouse: only the left button draws (others turn or pan the view)
-      if (ev.pointerType === 'mouse' && ev.button !== 0) { this.cursor.style.display = 'none'; return; }
+      // Mouse and pen: only the primary button draws (others turn or pan the view)
+      if ((ev.pointerType === 'mouse' || ev.pointerType === 'pen') && ev.button !== 0) { this.cursor.style.display = 'none'; return; }
       if (stroke) {
         // Second finger: this is a camera gesture, not a stroke (a brush keeps what it did so far)
         if (sculpting()) this.ui.run(() => this.ui.editor.separator.brushUp());
@@ -379,7 +379,7 @@ export class SeparatePanel {
     }, true);
     canvas.addEventListener('pointerleave', () => { this.cursor.style.display = 'none'; });
     canvas.addEventListener('pointermove', (ev) => {
-      if (!passed.size && (stroke?.id === ev.pointerId || (ev.pointerType === 'mouse' && ev.buttons === 0))) this.previewBrush(local(ev));
+      if (!passed.size && (stroke?.id === ev.pointerId || ((ev.pointerType === 'mouse' || ev.pointerType === 'pen') && ev.buttons === 0))) this.previewBrush(local(ev));
       if (!stroke || ev.pointerId !== stroke.id) return;
       swallow(ev);
       const p = local(ev), last = stroke.points[stroke.points.length - 1];
@@ -391,7 +391,7 @@ export class SeparatePanel {
     const end = (ev: PointerEvent) => {
       passed.delete(ev.pointerId);
       this.activeTouches = passed.size;
-      if (ev.pointerType !== 'mouse' || ev.type === 'pointercancel') this.cursor.style.display = 'none';
+      if ((ev.pointerType !== 'mouse' && ev.pointerType !== 'pen') || ev.type === 'pointercancel') this.cursor.style.display = 'none';
       if (!stroke || ev.pointerId !== stroke.id) return;
       swallow(ev);
       const points = stroke.points;
@@ -405,7 +405,7 @@ export class SeparatePanel {
   }
 
   /**
-   * While drawing with a mouse, the right button turns the view and the middle one pans (left draws).
+   * With a mouse or pen, the right button turns the view and the middle one pans (primary draws).
    * With touch pointers, 2 fingers rotate the view (and pinch to zoom), while 3 fingers pan.
    */
   private cameraButtons(drawing: boolean) {
