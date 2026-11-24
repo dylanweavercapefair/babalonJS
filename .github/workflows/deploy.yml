@@ -20,7 +20,7 @@ jobs:
           node-version: 22
           cache: 'npm'
       - run: npm ci
-      - run: npx vite build
+      - run: BASE_PATH=/babalonJS/ npx vite build
       - uses: actions/upload-pages-artifact@v4
         with:
           path: ./dist

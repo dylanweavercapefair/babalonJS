@@ -8,7 +8,6 @@ import { resolve } from 'node:path';
 const base = process.env.BASE_PATH || '/';
 
 export default defineConfig({
-  base: '/babalonJS/',
   base,
   build: { manifest: true },
   // Prebundle the lazy GLB factory and newly used Babylon modules before the first
